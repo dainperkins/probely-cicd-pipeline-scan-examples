@@ -12,7 +12,7 @@
 #
 # - GitHub Variables configured:
 #   REQUIRED
-#   - TARGET_ID: The ID of the Probely Target to be scanned
+#   - TARGET_ID: The ID of the Snyk APi & Web Target to be scanned
 #   OPTIONAL
 #   - BLOCK: default is FALSE, set to TRUE to enable blocking mode
 #   - BLOCKING_GATE: the criticality of vulnerability that will fail the scan via error response  (CRITICAL, HIGH, MEDIUM, LOW)
@@ -53,7 +53,7 @@ jobs:
             echo "Blocking mode enabled - will exit with error to block on defined vulnerability gate: ${{ vars.BLOCKING_GATE }}"
             probely targets follow-scan --api-key ${{ secrets.PROBELY_API_KEY }} --severity-threshold { ${{ vars.BLOCKING_GATE }} } ${{ vars.TARGET_ID }}
           else
-            echo "Blocking mode disabled - starting scan"
+            echo "Blocking mode disabled - starting synchronous follow-scan"
             probely targets follow-scan --api-key ${{ secrets.PROBELY_API_KEY }} ${{ vars.TARGET_ID }}
           fi
 
