@@ -1,0 +1,175 @@
+# Snyk API & Web CI/CD Example Workflow
+# - Initiate local agent based scan with preconfigured private API & Web Target with optional pipeline blocking mode
+#
+# Prerequisites:
+# - Existing Probely Target configured in Snyk API & Web
+# - Target ID of Snyk API & Web target to be scanned
+# - Snyk API & Web Scanning Agent configured in the UI
+#
+# - GitHub Secrets configured:
+#   - PROBELY_API_KEY: A Snyk API & Web API Key with access to the target to be scanned
+#   - PROBELY_AGENT_KEY: A Snyk API & Web Scanning agent key
+#
+# - GitHub Variables configured:
+#   - TARGET_ID: The ID of the Probely Target to be scanned
+#   - BLOCK: default is FALSE, set to TRUE to enable blocking mode
+#   - BLOCKING_GATE: the criticality of vulnerability that will fail the scan via error response  (CRITICAL, HIGH, MEDIUM, LOW)
+#   - DEBUG: default is false, set to true to enable debug output
+
+name: Snyk API & Web GHA CICD Pipeline - remote target/blocking mode
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Docker
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+
+      # Step 3: Create a custom Docker network
+      - name: Create custom Docker network
+        run: docker network create custom-network
+
+      # Step 4: Build and run the Docker app container
+      - name: Build and run app container
+        run: |
+          # Build the Docker image
+          docker build -t test-app .
+
+          # Run the Docker container with a custom hostname
+          docker run --name test-app \
+            --hostname custom-web-app \
+            --network custom-network \
+            -p 8080:8080 \
+            -d test-app
+
+      # Step 5: Get container IP
+      - name: Get container IP address
+        run: |
+          CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' test-app)
+          echo "Container IP is $CONTAINER_IP"
+
+          # Add the custom hostname to the /etc/hosts file
+          echo "$CONTAINER_IP ${{ vars.TARGET_HOSTNAME }} ${{ vars.TARGET_HOSTNAME }}." | sudo tee -a /etc/hosts
+          cat /etc/hosts # confirm host is on /etc/hosts
+
+      # Step 6: Wait for the app to start
+      - name: Wait for app to start
+        run: |
+          # Wait until the container is ready
+          for i in {1..10}; do
+            if curl -s ${{ vars.TARGET_URL }} > /dev/null; then
+              echo "App is up!";
+              break;
+            fi
+            echo "Waiting for the app to be ready...";
+            sleep 2;
+          done
+
+      # Step 7: Test application with curl
+      - name: Test application with curl
+        run: |
+          # Make a request to the web app using the custom hostname
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" ${{ vars.TARGET_URL }})
+          
+          if [ "$RESPONSE" -ne 200 ]; then
+            echo "App test failed with HTTP status $RESPONSE";
+            exit 1;
+          fi
+
+          curl -s -i ${{ vars.TARGET_URL }}
+          
+          echo "App test passed with HTTP status $RESPONSE";
+
+      # Setp 8: Start scanning agent
+      - name: Start Scanning Agent
+        run: |
+          # Using docker agent
+          docker run -d --name probely-agent \
+            --cap-add NET_ADMIN \
+            --network custom-network \
+            -e FARCASTER_AGENT_TOKEN=${{ secrets.AGENT_TOKEN }} \
+            --device /dev/net/tun probely/farcaster-onprem-agent:v2
+
+          # Using userspace agent
+          # chmod +x scanning-agent/farcasterd-linux-amd64-0.4.3
+          # ./scanning-agent/farcasterd-linux-amd64-0.4.3 --token ${{ secrets.AGENT_TOKEN }} &
+
+
+      # Step 9: Wait for agent to stat
+      - name: Wait for agent to stat
+        run: |
+          # Wait until the probely-agent is ready
+          for i in {1..10}; do
+            echo "-----------------------------------"
+            AGENT_RUNNING=$(docker logs probely-agent | grep 'Running...' | wc -l)
+            if [ $AGENT_RUNNING == "1" ]; then
+              echo "Agent is running!";
+              echo "------------------------"
+              docker logs probely-agent
+              echo "------------------------"
+              sleep 10
+              break;
+            fi
+            sleep 2;
+          done
+      
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+      # Step 1: Install Probely CLI 
+      - name: Install Probely CLI
+        run: |
+          # Install Probely CLI
+          pip install probely
+
+          if [ "${{ vars.DEBUG }}" = "TRUE" ]; then
+            pip show probely
+            probely --version
+            # Test probely GET TARGETS
+            probely targets get --api-key ${{ secrets.PROBELY_API_KEY }}
+          fi      
+
+      # Step 3: Run Snyk APi & Web Scanning Agent
+      - name: Install and Run Snyk API & Web Scanning Agent
+        run: |
+
+
+      # Step 2: Start Synchronous scan (wait for results) and error on defined blocking gate
+      - name: Start Scan
+        run: |
+          # check blocking mode
+          if [ "${{ vars.BLOCK }}" = "TRUE" ]; then
+            echo "Blocking mode enabled - will wait for scan to finish and block on defined gate: ${{ vars.BLOCKING_GATE }}"
+            probely targets follow-scan --api-key ${{ secrets.PROBELY_API_KEY }} --severity-threshold { ${{ vars.BLOCKING_GATE }} } ${{ vars.TARGET_ID }}
+          else
+            echo "Blocking mode disabled - starting scan"
+            probely targets follow-scan --api-key ${{ secrets.PROBELY_API_KEY }} ${{ vars.TARGET_ID }}
+          fi
+
+         
