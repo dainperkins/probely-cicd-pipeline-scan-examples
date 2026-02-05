@@ -45,7 +45,7 @@ jobs:
             probely targets get --api-key ${{ secrets.PROBELY_API_KEY }}
           fi      
 
-      # Step 2: Start Synchronous scan (wait for results) and error on defined blocking gate
+      # Step 2: Start Synchronous scan (wait for results) and optionally error on defined blocking gate to fail the pipeline
       - name: Start Scan
         run: |
           # check blocking mode
