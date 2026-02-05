@@ -1,0 +1,55 @@
+# Snyk API & Web CI/CD Example Workflow
+# - Initiate remote scan with preconfigured public or private API & Web Target with optional pipeline blocking mode
+#
+# Prerequisites:
+# - Existing Probely Target configured in Snyk API & Web
+#
+# - GitHub Secrets configured:
+#   - PROBELY_API_KEY: A Probely API Key with access to the target to be scanned
+#
+# - GitHub Variables configured:
+#   - TARGET_ID: The ID of the Probely Target to be scanned
+#   - BLOCK: default is FALSE, set to TRUE to enable blocking mode
+#   - BLOCKING_GATE: the criticality of vulnerability that will fail the scan via error response  (CRITICAL, HIGH, MEDIUM, LOW)
+#   - DEBUG: default is false, set to true to enable debug output
+
+name: Snyk API & Web GHA CICD Pipeline - remote target/blocking mode
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Install Probely CLI 
+      - name: Install Probely CLI
+        run: |
+          # Install Probely CLI
+          pip install probely
+          if [ "${{ vars.DEBUG }}" = "TRUE" ]; then
+            pip show probely
+            probely --version
+            # Test probely GET TARGETS
+            probely targets get --api-key ${{ secrets.PROBELY_API_KEY }}
+          fi      
+
+      # Step 2: Start Synchronous scan (wait for results) and error on defined blocking gate
+      - name: Start Scan
+        run: |
+          # check blocking mode
+          if [ "${{ vars.BLOCK }}" = "TRUE" ]; then
+            echo "Blocking mode enabled - will wait for scan to finish and block on defined gate: ${{ vars.BLOCKING_GATE }}"
+            probely targets follow-scan --api-key ${{ secrets.PROBELY_API_KEY }} --severity-threshold { ${{ vars.BLOCKING_GATE }} } ${{ vars.TARGET_ID }}
+          else
+            echo "Blocking mode disabled - starting scan"
+            probely targets follow-scan --api-key ${{ secrets.PROBELY_API_KEY }} ${{ vars.TARGET_ID }}
+          fi
+
+         
